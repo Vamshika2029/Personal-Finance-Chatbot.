@@ -1,0 +1,335 @@
+from dataclasses import dataclass
+from typing import List, Dict, Tuple, Optional
+import math
+import re
+import sys
+
+@dataclass
+class TaxSlab:
+    upto: Optional[float]  # None means no upper limit
+    rate: float            # decimal, e.g., 0.10 for 10%
+
+class PersonalFinanceChatbot:
+    def init(self):
+        self.default_slabs = [  # example progressive slabs (user can overwrite)
+            TaxSlab(upto=250000, rate=0.0),   # tax-free
+            TaxSlab(upto=500000, rate=0.05),  # 5%
+            TaxSlab(upto=1000000, rate=0.20), # 20%
+            TaxSlab(upto=None, rate=0.30),    # 30% for income above 1,000,000
+        ]
+        self.intro()
+
+    def intro(self):
+        print("Personal Finance Chatbot — Savings, Taxes, Investments")
+        print("Type 'help' for quick commands. Type 'exit' to quit.\n")
+
+    # ---------------------------
+    # Simple Natural-language parser (keyword based)
+    # ---------------------------
+    def parse_and_respond(self, text: str):
+        text = text.strip().lower()
+        if text in ("exit", "quit"):
+            print("Goodbye — stay financially healthy!")
+            sys.exit(0)
+        if text == "help":
+            self.print_help()
+            return
+
+        # Savings intent
+        if any(k in text for k in ["save", "savings", "saving plan", "how to save", "savings plan"]):
+            self.handle_savings_conversation(text)
+            return
+
+        # Taxes intent
+        if any(k in text for k in ["tax", "taxes", "income tax", "tax estimate", "taxes estimate"]):
+            self.handle_tax_conversation(text)
+            return
+
+        # Investment intent
+        if any(k in text for k in ["invest", "investment", "investing", "portfolio", "stocks", "mutual fund"]):
+            self.handle_investment_conversation(text)
+            return
+
+        # If user asked for examples or general advice
+        if any(k in text for k in ["advice", "guidance", "recommendation", "suggest"]):
+            self.print_general_guidance()
+            return
+
+        # Numeric question? try to detect
+        if re.search(r"\d", text):
+            print("I see numbers in your question. Please be explicit — e.g., 'Estimate tax for annual income 850000' or 'How to save 10000 monthly?'.")
+            return
+
+        # fallback
+        print("Sorry, I didn't get that. Try: 'help' or ask about 'savings', 'taxes', or 'investments'.")
+
+    def print_help(self):
+        print("Examples of commands you can try:")
+        print(" - Savings: 'I want to save 200000 in 2 years' or 'How much should I save monthly to reach 50000 in 6 months?'")
+        print(" - Taxes: 'Estimate tax for annual income 850000' or 'set tax slabs' to provide custom slabs.")
+        print(" - Investments: 'Suggest investments for moderate risk and 5-year horizon' or 'what allocation for high risk 10 years?'")
+        print(" - 'exit' to quit\n")
+
+    # ---------------------------
+    # Savings planning
+    # ---------------------------
+    def handle_savings_conversation(self, text: str):
+        # Try to extract target amount and horizon
+        amount = self._extract_amount(text)
+        months = self._extract_months_or_years(text)
+
+        if amount is None or months is None:
+            # interactive fallback
+            try:
+                if amount is None:
+                    amount = float(input("What's your target amount to save? (e.g. 50000): ").strip())
+                if months is None:
+                    horizon = input("What's your time horizon? (e.g. '2 years' or '18 months'): ").strip()
+                    months = self._parse_horizon_to_months(horizon)
+            except Exception as e:
+                print("Input error:", e)
+                return
+
+        monthly = self.savings_monthly_plan(amount, months)
+        print(f"To reach ₹{amount:,.2f} in {months} months, save about ₹{monthly:,.2f} per month.")
+        # suggest small safety tips
+        print("Tip: Automate monthly transfers and keep an emergency fund (3-6 months of expenses).")
+
+    def savings_monthly_plan(self, target_amount: float, months: int) -> float:
+        if months <= 0:
+            raise ValueError("Months must be positive.")
+        if target_amount <= 0:
+            raise ValueError("Target amount must be positive.")
+        return target_amount / months
+
+    def _extract_amount(self, text: str) -> Optional[float]:
+        # crude extraction: numbers possibly with commas/₹ or words 'k' 'lakh'
+        m = re.search(r'([\d,]+(?:\.\d+)?)\s*(k|lakh|lakhs|m|million|cr|crore|₹)?', text)
+        if not m:
+            return None
+        num = m.group(1).replace(',', '')
+        suffix = (m.group(2) or "").lower()
+        try:
+            val = float(num)
+        except:
+            return None
+        if suffix in ("k",):
+            val *= 1_000
+        elif suffix in ("m", "million"):
+            val *= 1_000_000
+        elif suffix in ("lakh", "lakhs"):
+            val *= 100_000
+        elif suffix in ("cr", "crore"):
+            val *= 10_000_00
+        return val
+
+    def _extract_months_or_years(self, text: str) -> Optional[int]:
+        # look for "months" or "years" or "in X years"
+        m_month = re.search(r'(\d+)\s*months?', text)
+        if m_month:
+            return int(m_month.group(1))
+        m_year = re.search(r'(\d+)\s*years?', text)
+        if m_year:
+            return int(m_year.group(1)) * 12
+        # also handle "in 2 yrs" or "in 6 mos"
+        m = re.search(r'(\d+)\s*(yr|yrs|year|months|mos|mo)', text)
+        if m:
+            token = m.group(2)
+            n = int(m.group(1))
+            if token.startswith('yr') or token.startswith('year'):
+                return n * 12
+            else:
+                return n
+        return None
+
+    def _parse_horizon_to_months(self, horizon_str: str) -> int:
+        horizon_str = horizon_str.lower()
+        m_year = re.search(r'(\d+)\s*years?', horizon_str)
+        if m_year:
+            return int(m_year.group(1)) * 12
+        m_month = re.search(r'(\d+)\s*months?', horizon_str)
+        if m_month:
+            return int(m_month.group(1))
+        # fallback: try integer as months
+        m = re.search(r'(\d+)', horizon_str)
+        if m:
+            return int(m.group(1))
+        raise ValueError("Couldn't parse horizon.")
+
+    # ---------------------------
+    # Tax estimation
+    # ---------------------------
+    def handle_tax_conversation(self, text: str):
+        # Check if user wants to set slabs
+        if "set tax slabs" in text or "custom slabs" in text:
+            print("Enter slabs one by one in 'upper_limit rate_percent' format, e.g. '250000 0' then '500000 5' ... finish with 'done'.")
+            slabs = []
+            while True:
+                line = input("slab> ").strip().lower()
+                if line in ("done", "end", ""):
+                    break
+                try:
+                    parts = line.split()
+                    upto = None
+                    if parts[0] != "none":
+                        upto = float(parts[0])
+                    rate = float(parts[1]) / 100.0
+                    slabs.append(TaxSlab(upto=upto, rate=rate))
+                except Exception as e:
+                    print("Bad format. Example: 250000 0  or  500000 5")
+            if slabs:
+                self.default_slabs = slabs
+                print("Custom slabs set.")
+            return
+
+        # Try to extract income
+        income = self._extract_amount(text)
+        if income is None:
+            try:
+                income = float(input("Enter your annual taxable income (e.g. 850000): ").strip())
+            except Exception as e:
+                print("Input error:", e)
+                return
+        tax, details = self.compute_tax(income, self.default_slabs)
+        print(f"Estimated tax on annual income ₹{income:,.2f} = ₹{tax:,.2f}")
+        print("Breakdown:")
+        for d in details:
+            print(f" - Income upto {d['upto_display']} taxed at {d['rate_percent']}% => tax ₹{d['tax_amount']:,.2f}")
+        print("Note: This is a simple estimate. It excludes cess, surcharges, deductions, and other allowances.")
+
+    def compute_tax(self, income: float, slabs: List[TaxSlab]) -> Tuple[float, List[Dict]]:
+        if income <= 0:
+            return 0.0, []
+        tax = 0.0
+        remaining = income
+        prev_limit = 0.0
+        details = []
+        for slab in slabs:
+            upper = slab.upto
+            rate = slab.rate
+            if upper is None:
+                taxable = max(0.0, remaining)
+            else:
+                bracket_amount = max(0.0, min(upper - prev_limit, remaining))
+                taxable = bracket_amount
+            slab_tax = taxable * rate
+            tax += slab_tax
+            details.append({
+                "upto_display": f"{'∞' if upper is None else f'₹{upper:,.0f}'}",
+                "rate_percent": rate * 100,
+                "taxable_amount": taxable,
+                "tax_amount": slab_tax
+            })
+            remaining -= taxable
+            prev_limit = upper if upper is not None else prev_limit
+            if remaining <= 0:
+                break
+        # simple rounding
+        tax = round(tax, 2)
+        return tax, details
+
+    # ---------------------------
+    # Investment advice
+    # ---------------------------
+    def handle_investment_conversation(self, text: str):
+        # extract risk level and horizon
+        risk = self._extract_risk(text)
+        years = self._extract_years(text)
+        if risk is None:
+            risk = input("What's your risk preference? (low / moderate / high): ").strip().lower()
+        if years is None:
+            try:
+                yrs_str = input("Investment horizon in years (e.g., 5): ").strip()
+                years = int(float(yrs_str))
+            except Exception as e:
+                print("Input error:", e)
+                return
+        allocation = self.recommend_allocation(risk, years)
+        print(f"Suggested allocation for '{risk}' risk and {years} year(s) horizon:")
+        for k, v in allocation.items():
+            print(f" - {k}: {v}%")
+        print("Notes:")
+        print(" - Rebalance annually, consider tax-efficient accounts, and diversify within each bucket (e.g., index funds, bonds, cash).")
+        print(" - This is educational, not investment advice. Consider consulting a registered advisor for personalized planning.")
+
+    def _extract_risk(self, text: str) -> Optional[str]:
+        for token in ("low", "conservative"):
+            if token in text:
+                return "low"
+        for token in ("moderate", "medium", "balanced"):
+            if token in text:
+                return "moderate"
+        for token in ("high", "aggressive"):
+            if token in text:
+                return "high"
+        return None
+
+    def _extract_years(self, text: str) -> Optional[int]:
+        m = re.search(r'(\d+)\s*years?', text)
+        if m:
+            return int(m.group(1))
+        return None
+
+    def recommend_allocation(self, risk: str, years: int) -> Dict[str, int]:
+        # A simple rule-of-thumb allocation
+        risk = (risk or "moderate").lower()
+        if risk == "low":
+            # strong tilt to debt/cash
+            base = {"Cash & Short-term": 30, "Bonds/Debt": 50, "Equities": 20}
+        elif risk == "high":
+            # aggressive: equities heavy
+            base = {"Cash & Short-term": 5, "Bonds/Debt": 15, "Equities": 80}
+        else:
+            # moderate
+            base = {"Cash & Short-term": 10, "Bonds/Debt": 40, "Equities": 50}
+        # tweak by horizon (longer horizon -> more equities)
+        if years >= 10:
+            # shift 10% from debt/cash to equities
+            shift = 10
+            # prioritize moving from Cash then Bonds
+            take_from_cash = min(shift, base["Cash & Short-term"])
+            base["Cash & Short-term"] -= take_from_cash
+            remaining_shift = shift - take_from_cash
+            take_from_bonds = min(remaining_shift, base["Bonds/Debt"])
+            base["Bonds/Debt"] -= take_from_bonds
+            base["Equities"] += (take_from_cash + take_from_bonds)
+        elif years <= 3:
+            # short horizon: reduce equities by 10%
+            reduce = min(10, base["Equities"])
+            base["Equities"] -= reduce
+            # put into cash
+            base["Cash & Short-term"] += reduce
+        # round to ints and ensure sum 100
+        rounded = {k: int(round(v)) for k, v in base.items()}
+        total = sum(rounded.values())
+        # adjust minor rounding difference
+        if total != 100:
+            diff = 100 - total
+            # apply diff to equities (or first key if equities missing)
+            key_to_fix = "Equities" if "Equities" in rounded else next(iter(rounded))
+            rounded[key_to_fix] += diff
+        return rounded
+
+    # ---------------------------
+    # General guidance
+    # ---------------------------
+    def print_general_guidance(self):
+        print("Basic principles:")
+        print(" 1) Save before you spend — automate savings.")
+        print(" 2) Build an emergency fund: 3-6 months living expenses.")
+        print(" 3) Diversify: mix equities, debt, and cash based on risk & horizon.")
+        print(" 4) Tax: use legal deductions and tax-advantaged accounts.")
+        print(" 5) Rebalance annually and review goals periodically.\n")
+
+# Simple command loop
+def main():
+    bot = PersonalFinanceChatbot()
+    try:
+        while True:
+            text = input("\nYou: ")
+            bot.parse_and_respond(text)
+    except (KeyboardInterrupt, SystemExit):
+        print("\nExiting. Stay safe!")
+
+if _name_ == "_main_":
+    main()
